@@ -135,11 +135,17 @@
       </div>
 
       <div class="field" id="f-paid">
-        <label>Who paid?</label>
-        <div class="choice" id="seg-paid">
-          <button type="button" data-v="company"><b>Company</b><small>Card or bank account</small></button>
-          <button type="button" data-v="personal"><b>I paid myself</b><small>I need paying back</small></button>
+        <label>Payment status</label>
+        <div class="choice three" id="seg-paid">
+          <button type="button" data-v="paid"><i class="dotc ok"></i><b>Paid</b><small id="paid-sub">From the company account</small></button>
+          <button type="button" data-v="unpaid"><i class="dotc bad"></i><b>Not paid yet</b><small>Supplier still to be paid</small></button>
+          <button type="button" data-v="personal" id="opt-personal"><i class="dotc warn"></i><b>I paid personally</b><small>From my own account, to reimburse</small></button>
         </div>
+      </div>
+
+      <div class="field" id="f-due" hidden>
+        <label for="det-due">Due date <span class="opt">(optional)</span></label>
+        <input id="det-due" class="input" type="date">
       </div>
 
       <div class="field">
@@ -180,13 +186,10 @@
     </header>
     <div class="seg wide" id="seg-act">
       <button data-v="uploads" class="on">Uploads</button>
-      <button data-v="reimb" id="tab-reimb">Reimbursements</button>
+      <button data-v="reimb" id="tab-reimb">Outstanding</button>
     </div>
     <div id="act-uploads" class="list"></div>
     <div id="act-reimb" class="list" hidden></div>
-    <footer class="sticky above-nav" id="pay-bar" hidden>
-      <button class="btn primary block" id="btn-pay">Mark paid</button>
-    </footer>
   </section>
 
   <!-- ============ Bottom nav ============ -->

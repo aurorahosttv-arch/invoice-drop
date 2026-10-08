@@ -19,7 +19,7 @@
     book: store.get('book', null),
     prop: store.get('prop', 'V'),
     paid: 'company',
-    selected: new Set(),
+    open: [],
   };
 
   /* ---------------- navigation ---------------- */
@@ -74,16 +74,16 @@
     $('#home-date').textContent = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
     $('#btn-profile').textContent = me.name.charAt(0);
     $('#demo-banner').hidden = !API.demo;
-    $('#tab-reimb').textContent = me.canApprove ? 'Reimbursements' : 'My money';
+    $('#tab-reimb').textContent = me.canApprove ? 'Outstanding' : 'My money';
     const card = $('#card-balance');
     card.classList.remove('attention');
-    if (me.books.indexOf('ml') < 0) { card.hidden = true; }
-    else if (me.canApprove) {
+    if (me.canApprove) {
       card.hidden = false;
-      const n = me.pendingCount || 0;
+      const o = me.outstanding || { count: 0, total: 0, overdue: 0 };
+      const n = o.count || 0;
       card.classList.toggle('attention', n > 0);
-      card.innerHTML = n ? '<div><div class="lbl">To reimburse</div><div class="amt">' + n + ' receipt' + (n > 1 ? 's' : '') + '</div></div><button class="btn primary" data-go="reimb">Review</button>'
-                         : '<div><div class="lbl">Reimbursements</div><div class="amt">All paid</div></div>';
+      card.innerHTML = n ? '<div><div class="lbl">Outstanding' + (o.overdue ? ' · <b class="overdue">' + o.overdue + ' overdue</b>' : '') + '</div><div class="amt">' + n + ' · ' + eur(o.total) + '</div></div><button class="btn primary" data-go="reimb">Review</button>'
+                         : '<div><div class="lbl">Outstanding</div><div class="amt">All settled</div></div>';
       $('#nav-dot').hidden = !n;
     } else {
       card.hidden = false;
@@ -259,7 +259,8 @@
   function openDetails() {
     const me = S.me;
     if (!S.book || me.books.indexOf(S.book) < 0) S.book = me.books.indexOf('ml') >= 0 && me.books.length === 1 ? 'ml' : me.books[0];
-    S.paid = 'company';
+    S.paid = me.role === 'staff' ? 'personal' : 'paid';
+    $('#det-due').value = '';
     $('#det-amount').value = ''; $('#det-supplier').value = ''; $('#det-note').value = ''; $('#det-error').textContent = '';
     $('#f-book').hidden = me.books.length < 2;
     $('#suppliers').innerHTML = store.get('suppliers', []).map(s => '<option value="' + esc(s) + '">').join('');
@@ -274,13 +275,19 @@
     $$('#seg-prop button').forEach(b => b.classList.toggle('on', b.dataset.v === S.prop));
     $$('#seg-paid button').forEach(b => b.classList.toggle('on', b.dataset.v === S.paid));
     $('#f-prop').hidden = S.book !== 'props';
-    $('#f-paid').hidden = S.book !== 'ml';
-    const required = S.book === 'ml' && S.paid === 'personal';
-    $('#amount-opt').textContent = required ? '(needed for your refund)' : '(optional)';
+    const staff = S.me.role === 'staff';
+    if (S.book === 'props' && S.paid === 'personal') S.paid = 'paid';
+    $$('#seg-paid button').forEach(b => b.classList.toggle('on', b.dataset.v === S.paid));
+    $('#f-paid').hidden = staff;
+    $('#opt-personal').hidden = S.book !== 'ml';
+    $('#paid-sub').textContent = S.book === 'ml' ? 'From the company account' : 'Already paid';
+    $('#f-due').hidden = S.paid !== 'unpaid';
+    $('#amount-opt').textContent = S.paid === 'personal' ? (staff ? '(needed for your refund)' : '(needed for the reimbursement)')
+      : S.paid === 'unpaid' ? '(amount due)' : '(optional)';
   }
   $('#seg-book').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.book = b.dataset.v; syncDetails(); });
   $('#seg-prop').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.prop = b.dataset.v; syncDetails(); });
-  $('#seg-paid').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.paid = b.dataset.v; syncDetails(); if (S.paid === 'personal') $('#det-amount').focus(); });
+  $('#seg-paid').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.paid = b.dataset.v; syncDetails(); if (S.paid !== 'paid') $('#det-amount').focus(); });
   ['#det-amount', '#det-supplier', '#det-note'].forEach(id => $(id).addEventListener('input', () => { $('#det-error').textContent = ''; }));
   $('#det-back').addEventListener('click', () => (S.file ? (resetDoc(), show('home')) : showPages()));
 
@@ -290,7 +297,8 @@
     const amountRaw = $('#det-amount').value.trim().replace(',', '.');
     const amount = amountRaw ? Number(amountRaw) : 0;
     if (amountRaw && !(amount > 0)) return ($('#det-error').textContent = 'Please enter the amount as a number, e.g. 24.50');
-    if (S.book === 'ml' && S.paid === 'personal' && !(amount > 0)) return ($('#det-error').textContent = 'Please enter how much you paid, so we can pay you back.');
+    if (S.paid === 'personal' && S.book === 'ml' && !(amount > 0)) return ($('#det-error').textContent = 'Please enter how much you paid, so it can be paid back.');
+    if (S.paid === 'unpaid' && !(amount > 0)) return ($('#det-error').textContent = 'Please enter the amount due, so it shows in Outstanding.');
     busy(true, 'Preparing PDF…');
     await new Promise(r => setTimeout(r, 30));
     let file;
@@ -302,7 +310,7 @@
       }
     } catch (err) { busy(false); return ($('#det-error').textContent = 'Could not build the PDF: ' + err.message); }
     const payload = {
-      book: S.book, property: S.book === 'props' ? S.prop : '', paidBy: S.book === 'ml' ? S.paid : 'company',
+      book: S.book, property: S.book === 'props' ? S.prop : '', payment: S.paid, dueDate: S.paid === 'unpaid' ? $('#det-due').value : '',
       amount: amount || '', supplier: $('#det-supplier').value.trim(), note: $('#det-note').value.trim(), file,
     };
     store.set('book', S.book); store.set('prop', S.prop);
@@ -362,7 +370,7 @@
       busy(true, 'Checking it arrived…');
       const hit = await checkLanded(payload, started);
       busy(false);
-      if (hit) return done({ id: hit.id, reimbursable: /^Personal/.test(hit.paidBy || '') }, payload);
+      if (hit) return done({ id: hit.id, status: hit.payment }, payload);
       $('#det-error').textContent = 'Not saved: ' + err.message + '. Please tap Save again.';
     }
   }
@@ -372,7 +380,8 @@
     $('#done-tick').classList.toggle('queued', !!queued);
     $('#done-title').textContent = queued ? 'Saved on this phone' : 'Saved';
     let text = queued ? 'No connection right now. It will upload automatically next time you open the app.' : where + (r && r.id ? ' · ' + r.id : '');
-    if (!queued && r && r.reimbursable) text += '\nAdded to your reimbursements: ' + eur(payload.amount);
+    if (!queued && r && r.status === 'To reimburse') text += '\nAdded to reimbursements: ' + eur(payload.amount);
+    if (!queued && r && r.status === 'Not paid') text += '\nAdded to Outstanding: ' + eur(payload.amount) + ' to pay';
     $('#done-text').textContent = text;
     $('#done-text').style.whiteSpace = 'pre-line';
     resetDoc();
@@ -412,10 +421,13 @@
     $$('#seg-act button').forEach(b => b.classList.toggle('on', b.dataset.v === actTab));
     $('#act-uploads').hidden = actTab !== 'uploads';
     $('#act-reimb').hidden = actTab !== 'reimb';
-    $('#pay-bar').hidden = true;
     if (actTab === 'uploads') loadUploads(); else loadReimb();
   }
   $('#seg-act').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) openActivity(b.dataset.v); });
+
+  const PILL = { 'Not paid': '<span class="pill unpaid">Not paid</span>', 'To reimburse': '<span class="pill reimb">To reimburse</span>', 'Reimbursed': '<span class="pill done">Reimbursed</span>' };
+  const whereOf = (it) => it.book === 'props' ? (it.property || 'Properties') : 'Mistral Loom';
+  const todayIso = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
 
   async function loadUploads() {
     const el = $('#act-uploads');
@@ -424,11 +436,9 @@
       const { items } = await API.call('recent', { limit: 40 });
       if (!items.length) { el.innerHTML = '<div class="empty">Nothing uploaded yet.</div>'; return; }
       el.innerHTML = items.map(it => {
-        const where = it.book === 'props' ? it.property : 'Mistral Loom';
-        const personal = /^Personal/.test(it.paidBy || '');
         const tag = it.url ? 'a' : 'div';
-        return '<' + tag + ' class="row"' + (it.url ? ' href="' + esc(it.url) + '" target="_blank" rel="noopener"' : '') + '><div class="main"><div class="t">' + esc(it.supplier || 'Invoice') + (personal ? '<span class="pill">Refund</span>' : '') + '</div>' +
-          '<div class="s">' + fmtDate(it.at) + ' · ' + esc(it.by) + ' · ' + esc(where) + '</div></div><div class="a">' + (it.amount ? eur(it.amount) : '') + '</div></' + tag + '>';
+        return '<' + tag + ' class="row"' + (it.url ? ' href="' + esc(it.url) + '" target="_blank" rel="noopener"' : '') + '><div class="main"><div class="t">' + esc(it.supplier || 'Invoice') + (PILL[it.payment] || '') + '</div>' +
+          '<div class="s">' + fmtDate(it.at) + ' · ' + esc(it.by) + ' · ' + esc(whereOf(it)) + '</div></div><div class="a">' + (it.amount ? eur(it.amount) : '') + '</div></' + tag + '>';
       }).join('');
     } catch (e) { el.innerHTML = '<div class="empty">' + esc(e.offline ? 'You are offline.' : e.message) + '</div>'; }
   }
@@ -436,74 +446,103 @@
   async function loadReimb() {
     const el = $('#act-reimb');
     el.innerHTML = '<div class="empty">Loading…</div>';
-    S.selected.clear();
     try {
-      const { items, totals } = await API.call('reimbursements');
+      const { items, settled, totals } = await API.call('outstanding');
+      S.open = items;
       const approver = S.me.canApprove;
-      const pending = items.filter(i => i.status === 'Pending'), paid = items.filter(i => i.status !== 'Pending');
       let html = '';
-      const people = Object.keys(totals);
       if (approver) {
-        html += people.length ? '<div class="totals">' + people.map(p => '<div class="card balance attention"><div><div class="lbl">Owed to ' + esc(p) + '</div><div class="amt">' + eur(totals[p]) + '</div></div><button class="btn primary" data-all="' + esc(p) + '">Select all</button></div>').join('') + '</div>'
-          : '<div class="card balance"><div><div class="lbl">Reimbursements</div><div class="amt">All paid</div></div></div>';
+        const unpaid = items.filter(i => i.payment === 'Not paid');
+        const reimb = items.filter(i => i.payment === 'To reimburse');
+        if (!items.length) html += '<div class="card balance"><div><div class="lbl">Outstanding</div><div class="amt">All settled</div></div></div>';
+        if (unpaid.length) {
+          html += '<div class="group-title">Suppliers to pay · ' + eur(totals.unpaid) + '</div>' + unpaid.map(rowO).join('');
+        }
+        if (reimb.length) {
+          html += '<div class="group-title">To reimburse</div>';
+          Object.keys(totals.reimburse).forEach(p => {
+            const mine = reimb.filter(r => r.paidBy === p);
+            html += '<div class="card balance attention" style="margin:6px 0"><div><div class="lbl">Owed to ' + esc(p) + '</div><div class="amt">' + eur(totals.reimburse[p]) + '</div></div>' +
+              (mine.length > 1 ? '<button class="btn primary" data-all="' + esc(p) + '">Reimburse all</button>' : '') + '</div>' + mine.map(rowO).join('');
+          });
+        }
       } else {
-        const mine = totals[S.me.name] || 0;
+        const mine = items.reduce((a, r) => a + r.amount, 0);
         html += '<div class="card balance' + (mine ? ' attention' : '') + '"><div><div class="lbl">Owed to you</div><div class="amt">' + eur(mine) + '</div></div></div>';
+        if (items.length) html += '<div class="group-title">Waiting</div>' + items.map(rowO).join('');
+        if (!items.length && !settled.length) html += '<div class="empty">Receipts you paid yourself will appear here.</div>';
       }
-      if (pending.length) html += '<div class="group-title">Waiting</div>' + pending.map(r => rowR(r, approver)).join('');
-      if (paid.length) html += '<div class="group-title">Paid</div>' + paid.slice(0, 30).map(r => rowR(r, false)).join('');
-      if (!items.length) html += '<div class="empty">Receipts you paid yourself will appear here.</div>';
+      if (settled.length) html += '<div class="group-title">Recently settled</div>' + settled.slice(0, 15).map(rowS).join('');
       el.innerHTML = html;
-      el.querySelectorAll('[data-all]').forEach(b => b.onclick = () => { pending.filter(r => r.person === b.dataset.all).forEach(r => S.selected.add(r.id)); syncSel(pending); });
-      el.querySelectorAll('.row.selectable').forEach(row => row.onclick = (e) => { if (e.target.closest('a')) return; const id = row.dataset.id; S.selected.has(id) ? S.selected.delete(id) : S.selected.add(id); syncSel(pending); });
-      S.pendingItems = pending;
-      syncSel(pending);
+      el.querySelectorAll('.row.tap').forEach(row => row.onclick = (e) => { if (e.target.closest('a')) return; const it = items.find(i => i.id === row.dataset.id); if (it && approver) openItem(it); });
+      el.querySelectorAll('[data-all]').forEach(b => b.onclick = () => reimburseSheet(items.filter(i => i.payment === 'To reimburse' && i.paidBy === b.dataset.all)));
     } catch (e) { el.innerHTML = '<div class="empty">' + esc(e.offline ? 'You are offline.' : e.message) + '</div>'; }
   }
-  function rowR(r, selectable) {
-    const sub = r.status === 'Pending' ? fmtDate(r.date) + (S.me.canApprove ? ' · ' + esc(r.person) : '')
-      : 'Paid ' + fmtDate(r.paidOn) + (r.method ? ' · ' + esc(r.method) : '') + (r.paidBy ? ' · by ' + esc(r.paidBy) : '');
-    return '<div class="row ' + (selectable ? 'selectable' : '') + (r.status !== 'Pending' ? ' paid' : '') + '" data-id="' + esc(r.id) + '">' + (selectable ? '<span class="check"></span>' : '') +
-      '<div class="main"><div class="t">' + esc(r.supplier || 'Receipt') + (r.status === 'Pending' ? '<span class="pill">Waiting</span>' : '<span class="pill paid">Paid</span>') + '</div><div class="s">' + sub +
-      (r.receipt ? ' · <a href="' + esc(r.receipt) + '" target="_blank" rel="noopener">receipt</a>' : '') + '</div></div><div class="a">' + eur(r.amount) + '</div></div>';
+
+  function rowO(r) {
+    const overdue = r.payment === 'Not paid' && r.due && r.due < todayIso();
+    const sub = [fmtDate(r.at), esc(whereOf(r))];
+    if (r.payment === 'Not paid' && r.due) sub.push(overdue ? '<b class="overdue">overdue since ' + fmtDate(r.due) + '</b>' : 'due ' + fmtDate(r.due));
+    if (r.payment === 'To reimburse' && S.me.canApprove) sub.push('paid by ' + esc(r.paidBy));
+    if (r.url) sub.push('<a href="' + esc(r.url) + '" target="_blank" rel="noopener">document</a>');
+    return '<div class="row' + (S.me.canApprove ? ' tap' : '') + '" data-id="' + esc(r.id) + '"><div class="main"><div class="t">' + esc(r.supplier || 'Invoice') + (PILL[r.payment] || '') + '</div><div class="s">' + sub.join(' · ') + '</div></div>' +
+      '<div class="a">' + eur(r.amount) + '</div>' + (S.me.canApprove ? '<span class="chev">›</span>' : '') + '</div>';
   }
-  function syncSel(pending) {
-    $$('#act-reimb .row.selectable').forEach(r => r.classList.toggle('sel', S.selected.has(r.dataset.id)));
-    const total = pending.filter(r => S.selected.has(r.id)).reduce((a, r) => a + r.amount, 0);
-    $('#pay-bar').hidden = !S.selected.size;
-    $('#btn-pay').textContent = 'Mark paid · ' + eur(total);
+  function rowS(r) {
+    const what = r.payment === 'Reimbursed' ? 'Reimbursed to ' + esc(r.paidBy) : 'Paid';
+    return '<div class="row paid"><div class="main"><div class="t">' + esc(r.supplier || 'Invoice') + (r.payment === 'Reimbursed' ? PILL.Reimbursed : '<span class="pill done">Paid</span>') + '</div>' +
+      '<div class="s">' + what + ' ' + fmtDate(r.settledOn) + (r.method ? ' · ' + esc(r.method) : '') + (r.settledBy ? ' · by ' + esc(r.settledBy) : '') + '</div></div><div class="a">' + eur(r.amount) + '</div></div>';
   }
 
-  $('#btn-pay').addEventListener('click', () => {
-    const items = (S.pendingItems || []).filter(r => S.selected.has(r.id));
+  function detailsKV(it) {
+    return '<div class="kv"><span>Where</span><span>' + esc(whereOf(it)) + '</span><span>Uploaded</span><span>' + fmtDate(it.at) + ' by ' + esc(it.by) + '</span>' +
+      (it.due ? '<span>Due</span><span>' + fmtDate(it.due) + '</span>' : '') + (it.note ? '<span>Note</span><span>' + esc(it.note) + '</span>' : '') +
+      (it.url ? '<span>Document</span><span><a href="' + esc(it.url) + '" target="_blank" rel="noopener">open</a></span>' : '') + '</div>';
+  }
+
+  function openItem(it) {
+    if (it.payment === 'To reimburse') return reimburseSheet([it]);
+    // Not paid
+    const ml = it.book === 'ml';
+    let method = store.get('supplierMethod', 'Bank transfer');
+    const s = sheet('<h2>' + esc(it.supplier || 'Invoice') + ' · ' + eur(it.amount) + '</h2>' + detailsKV(it) +
+      '<p class="muted">How was it paid?</p>' +
+      '<div class="chips" id="sh-methods">' + ['Bank transfer', 'Card', 'Direct debit', 'Cash'].map(m => '<button class="chip' + (m === method ? ' on' : '') + '" data-m="' + m + '">' + m + '</button>').join('') + '</div>' +
+      '<div class="opts"><button class="btn primary block big" id="sh-company">' + (ml ? 'Paid from company account' : 'Mark as paid') + '</button>' +
+      (ml ? '<button class="btn ghost block" id="sh-personal">I paid it personally (to reimburse me)</button>' : '') + '</div>');
+    s.querySelector('#sh-methods').onclick = (e) => { const b = e.target.closest('.chip'); if (!b) return; method = b.dataset.m; s.querySelectorAll('#sh-methods .chip').forEach(c => c.classList.toggle('on', c === b)); };
+    s.querySelector('#sh-company').onclick = () => { store.set('supplierMethod', method); doSettle({ ids: [it.id], kind: 'paid', via: 'company', method }, 'Marked ' + eur(it.amount) + ' as paid'); };
+    if (ml) s.querySelector('#sh-personal').onclick = () => doSettle({ ids: [it.id], kind: 'paid', via: 'personal' }, 'Moved to reimburse ' + S.me.name);
+  }
+
+  function reimburseSheet(items) {
+    if (!items.length) return;
     const total = items.reduce((a, r) => a + r.amount, 0);
-    const people = Array.from(new Set(items.map(r => r.person))).join(', ');
-    let method = store.get('payMethod', 'Cash'); let proof = null;
-    const s = sheet('<h2>Paid ' + esc(people) + ' ' + eur(total) + '?</h2><p class="muted">' + items.length + ' receipt' + (items.length > 1 ? 's' : '') + '</p>' +
-      '<div class="chips" id="sh-methods">' + ['Cash', 'Revolut', 'Bank transfer', 'Other'].map(m => '<button class="chip' + (m === method ? ' on' : '') + '" data-m="' + m + '">' + m + '</button>').join('') + '</div>' +
+    const person = items[0].paidBy;
+    let method = store.get('payMethod', 'Bank transfer'); let proof = null;
+    const s = sheet('<h2>Reimburse ' + esc(person) + ' ' + eur(total) + '?</h2>' + (items.length === 1 ? detailsKV(items[0]) : '<p class="muted">' + items.length + ' items</p>') +
+      '<div class="chips" id="sh-methods">' + ['Bank transfer', 'Revolut', 'Cash', 'Other'].map(m => '<button class="chip' + (m === method ? ' on' : '') + '" data-m="' + m + '">' + m + '</button>').join('') + '</div>' +
       '<button class="btn ghost block" id="sh-proof">Attach proof of payment (optional)</button>' +
-      '<button class="btn primary block big" id="sh-confirm">Confirm paid</button>');
-    s.querySelector('#sh-methods').onclick = (e) => { const b = e.target.closest('.chip'); if (!b) return; method = b.dataset.m; s.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c === b)); };
+      '<button class="btn primary block big" id="sh-confirm">Mark reimbursed</button>');
+    s.querySelector('#sh-methods').onclick = (e) => { const b = e.target.closest('.chip'); if (!b) return; method = b.dataset.m; s.querySelectorAll('#sh-methods .chip').forEach(c => c.classList.toggle('on', c === b)); };
     s.querySelector('#sh-proof').onclick = () => {
       const inp = $('#in-proof');
       inp.onchange = async () => {
         const f = inp.files[0]; inp.value = ''; if (!f) return;
         if (f.type === 'application/pdf') proof = { b64: await fileToB64(f), mime: 'application/pdf' };
-        else { const c = await loadImage(f); const sc = Scanner.makeCanvas(Math.round(c.width * Math.min(1, 1600 / Math.max(c.width, c.height))), Math.round(c.height * Math.min(1, 1600 / Math.max(c.width, c.height)))); sc.getContext('2d').drawImage(c, 0, 0, sc.width, sc.height); proof = { b64: sc.toDataURL('image/jpeg', 0.75).split(',')[1], mime: 'image/jpeg' }; }
+        else { const c = await loadImage(f); const k = Math.min(1, 1600 / Math.max(c.width, c.height)); const sc = Scanner.makeCanvas(Math.round(c.width * k), Math.round(c.height * k)); sc.getContext('2d').drawImage(c, 0, 0, sc.width, sc.height); proof = { b64: sc.toDataURL('image/jpeg', 0.75).split(',')[1], mime: 'image/jpeg' }; }
         s.querySelector('#sh-proof').textContent = '✓ Proof attached';
       };
       inp.click();
     };
-    s.querySelector('#sh-confirm').onclick = async () => {
-      store.set('payMethod', method);
-      closeSheet(); busy(true, 'Saving…');
-      try {
-        const r = await API.call('markPaid', { ids: items.map(i => i.id), method, proof });
-        busy(false); toast('Marked ' + eur(r.total) + ' as paid');
-        refreshMe(); loadReimb();
-      } catch (e) { busy(false); toast(e.message, 4000); }
-    };
-  });
+    s.querySelector('#sh-confirm').onclick = () => { store.set('payMethod', method); doSettle({ ids: items.map(i => i.id), kind: 'reimbursed', method, proof }, 'Reimbursed ' + eur(total) + ' to ' + person); };
+  }
+
+  async function doSettle(body, okMsg) {
+    closeSheet(); busy(true, 'Saving…');
+    try { await API.call('settle', body); busy(false); toast(okMsg); refreshMe(); loadReimb(); }
+    catch (e) { busy(false); toast(e.offline ? 'No connection. Try again later.' : e.message, 4000); }
+  }
 
   /* ---------------- service worker ---------------- */
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});

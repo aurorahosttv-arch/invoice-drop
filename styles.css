@@ -174,3 +174,23 @@ h2 { font-size: 17px; margin: 0; font-weight: 600; }
 .spinner { width: 36px; height: 36px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--accent); animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 [hidden] { display: none !important; }
+
+/* ---------- payment status ---------- */
+.choice.three { grid-template-columns: 1fr; }
+.choice.three button { grid-template-columns: 14px 1fr; column-gap: 10px; align-items: center; }
+.choice.three button b { grid-column: 2; }
+.choice.three button small { grid-column: 2; }
+.choice.three button .dotc { grid-row: 1 / span 2; }
+.dotc { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+.dotc.ok { background: #2E9E6B; } .dotc.bad { background: #C8463D; } .dotc.warn { background: #D98A2B; }
+.pill.unpaid { background: #F6DEDB; color: #A3352D; }
+.pill.reimb { background: var(--warn-soft); color: var(--warn); }
+.pill.done { background: var(--accent-soft); color: var(--accent); }
+@media (prefers-color-scheme: dark) { .pill.unpaid { background: #3B1E1B; color: #F09389; } }
+.overdue { color: #C8463D; }
+.row.tap { cursor: pointer; }
+.row .chev { color: var(--muted); font-size: 20px; }
+.sub-total { font-size: 14px; color: var(--muted); font-weight: 600; }
+.sheet .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 14px; }
+.sheet .kv span:nth-child(odd) { color: var(--muted); }
+.sheet .opts { display: grid; gap: 10px; }
