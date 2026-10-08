@@ -13,7 +13,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=3">
 </head>
 <body>
   <!-- ============ Setup ============ -->
@@ -192,6 +192,8 @@
     <div id="act-reimb" class="list" hidden></div>
   </section>
 
+  <div hidden><div id="pay-bar"></div><button id="btn-pay"></button></div>
+
   <!-- ============ Bottom nav ============ -->
   <nav class="tabbar" id="tabbar" hidden>
     <button data-go="home" class="on">
@@ -214,10 +216,35 @@
   <input type="file" id="in-file" accept="image/*,application/pdf" hidden>
   <input type="file" id="in-proof" accept="image/*,application/pdf" hidden>
 
-  <script src="config.js"></script>
-  <script src="scanner.js"></script>
-  <script src="pdf.js"></script>
-  <script src="api.js"></script>
-  <script src="app.js"></script>
+  <script>
+    // Safety net: never leave a blank screen if a script fails to load or crashes on start.
+    (function () {
+      function fail() {
+        var b = document.getElementById('busy');
+        if (document.querySelector('.view.on') || document.getElementById('crash') || (b && !b.hidden)) return;
+        var d = document.createElement('div'); d.id = 'crash';
+        d.style.cssText = 'padding:80px 24px;text-align:center;font:16px -apple-system,Roboto,Arial,sans-serif;color:#15171A';
+        d.innerHTML = '<h2 style="margin:0 0 8px">Invoice Drop is updating</h2><p style="color:#6E7076">Please tap below to load the latest version.</p>' +
+          '<button style="margin-top:16px;height:50px;padding:0 24px;border:0;border-radius:14px;background:#0F6E5C;color:#fff;font:600 16px inherit">Reload</button>';
+        d.querySelector('button').onclick = function () {
+          var go = function () { location.reload(); };
+          try {
+            var jobs = [];
+            if (navigator.serviceWorker) jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); }));
+            if (window.caches) jobs.push(caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); }));
+            Promise.all(jobs).then(go, go);
+          } catch (e) { go(); }
+        };
+        document.body.appendChild(d);
+      }
+      window.addEventListener('error', function () { setTimeout(fail, 300); }, true);
+      window.addEventListener('load', function () { setTimeout(fail, 8000); });
+    })();
+  </script>
+  <script src="config.js?v=3"></script>
+  <script src="scanner.js?v=3"></script>
+  <script src="pdf.js?v=3"></script>
+  <script src="api.js?v=3"></script>
+  <script src="app.js?v=3"></script>
 </body>
 </html>
