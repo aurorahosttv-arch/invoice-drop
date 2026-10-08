@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Invoice Drop</title>
+  <meta name="theme-color" content="#F5F3EE" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#121316" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Invoice Drop">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- ============ Setup ============ -->
+  <section class="view" id="v-setup">
+    <div class="setup">
+      <img class="logo" src="icons/icon-192.png" alt="">
+      <h1>Invoice Drop</h1>
+      <p class="muted">Enter the access code you were given.</p>
+      <form id="setup-form" autocomplete="off">
+        <input id="setup-code" class="input code" placeholder="Access code" autocapitalize="characters" spellcheck="false" maxlength="16" required>
+        <button class="btn primary block" type="submit">Continue</button>
+      </form>
+      <p class="error" id="setup-error"></p>
+    </div>
+  </section>
+
+  <!-- ============ Home ============ -->
+  <section class="view" id="v-home">
+    <header class="top">
+      <div>
+        <p class="eyebrow" id="home-date"></p>
+        <h1 id="home-hello">Hello</h1>
+      </div>
+      <button class="avatar" id="btn-profile" aria-label="Profile"></button>
+    </header>
+
+    <div class="demo-banner" id="demo-banner" hidden>Demo mode: nothing is uploaded yet.</div>
+    <div class="banner" id="queue-banner" hidden></div>
+    <div class="banner install" id="install-banner" hidden></div>
+
+    <div class="scan-wrap">
+      <button class="scan-btn" id="btn-scan" aria-label="Scan an invoice">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16M7 12h10"/></svg>
+      </button>
+      <p class="scan-label">Scan invoice</p>
+      <button class="link" id="btn-upload">or upload a PDF or photo</button>
+    </div>
+
+    <div class="card balance" id="card-balance" hidden></div>
+  </section>
+
+  <!-- ============ Crop ============ -->
+  <section class="view dark" id="v-crop">
+    <header class="bar">
+      <button class="icon-btn" id="crop-cancel" aria-label="Cancel">✕</button>
+      <span class="bar-title">Adjust corners</span>
+      <button class="text-btn" id="crop-full">Full photo</button>
+    </header>
+    <div class="stage" id="crop-stage">
+      <canvas id="crop-canvas"></canvas>
+      <svg id="crop-svg"><polygon id="crop-poly"/></svg>
+      <div class="handle" data-i="0"></div><div class="handle" data-i="1"></div>
+      <div class="handle" data-i="2"></div><div class="handle" data-i="3"></div>
+    </div>
+    <footer class="bar bottom">
+      <button class="text-btn" id="crop-retake">Retake</button>
+      <button class="btn primary" id="crop-next">Next</button>
+    </footer>
+  </section>
+
+  <!-- ============ Preview / filter ============ -->
+  <section class="view dark" id="v-preview">
+    <header class="bar">
+      <button class="icon-btn" id="prev-back" aria-label="Back">‹</button>
+      <span class="bar-title">Page <span id="prev-num">1</span></span>
+      <button class="icon-btn" id="prev-rotate" aria-label="Rotate">⟳</button>
+    </header>
+    <div class="stage"><canvas id="prev-canvas"></canvas></div>
+    <div class="chips" id="prev-filters">
+      <button class="chip on" data-f="scan">Scan</button>
+      <button class="chip" data-f="bw">B&amp;W</button>
+      <button class="chip" data-f="original">Original</button>
+    </div>
+    <footer class="bar bottom">
+      <span></span>
+      <button class="btn primary" id="prev-keep">Keep page</button>
+    </footer>
+  </section>
+
+  <!-- ============ Pages tray ============ -->
+  <section class="view" id="v-pages">
+    <header class="top small">
+      <button class="icon-btn" id="pages-cancel" aria-label="Discard">✕</button>
+      <h2><span id="pages-count">1</span> page<span id="pages-s"></span></h2>
+      <span></span>
+    </header>
+    <div class="thumbs" id="thumbs"></div>
+    <footer class="sticky">
+      <button class="btn ghost" id="pages-add">+ Add page</button>
+      <button class="btn primary" id="pages-done">Continue</button>
+    </footer>
+  </section>
+
+  <!-- ============ Details ============ -->
+  <section class="view" id="v-details">
+    <header class="top small">
+      <button class="icon-btn" id="det-back" aria-label="Back">‹</button>
+      <h2>Details</h2>
+      <span></span>
+    </header>
+    <form id="det-form" class="form" autocomplete="off">
+      <div class="doc-summary" id="det-summary"></div>
+
+      <div class="field" id="f-book">
+        <label>Where does it belong?</label>
+        <div class="seg" id="seg-book">
+          <button type="button" data-v="props">David's Properties</button>
+          <button type="button" data-v="ml">Mistral Loom</button>
+        </div>
+      </div>
+
+      <div class="field" id="f-prop">
+        <label>Property</label>
+        <div class="seg" id="seg-prop">
+          <button type="button" data-v="V">Valletta</button>
+          <button type="button" data-v="G">Gzira</button>
+          <button type="button" data-v="U">Not sure</button>
+        </div>
+      </div>
+
+      <div class="field" id="f-paid">
+        <label>Who paid?</label>
+        <div class="choice" id="seg-paid">
+          <button type="button" data-v="company"><b>Company</b><small>Card or bank account</small></button>
+          <button type="button" data-v="personal"><b>I paid myself</b><small>I need paying back</small></button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="det-amount">Amount <span class="opt" id="amount-opt">(optional)</span></label>
+        <div class="money"><span>€</span><input id="det-amount" class="input" inputmode="decimal" placeholder="0.00"></div>
+      </div>
+      <div class="field">
+        <label for="det-supplier">Supplier <span class="opt">(optional)</span></label>
+        <input id="det-supplier" class="input" list="suppliers" placeholder="e.g. Pavi, ARMS, GO">
+        <datalist id="suppliers"></datalist>
+      </div>
+      <div class="field">
+        <label for="det-note">Note <span class="opt">(optional)</span></label>
+        <input id="det-note" class="input" placeholder="What was it for?">
+      </div>
+      <p class="error" id="det-error"></p>
+      <button class="btn primary block big" id="det-save" type="submit">Save</button>
+    </form>
+  </section>
+
+  <!-- ============ Done ============ -->
+  <section class="view" id="v-done">
+    <div class="done">
+      <div class="tick" id="done-tick">
+        <svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="24"/><path d="M15 27l7 7 15-16"/></svg>
+      </div>
+      <h1 id="done-title">Saved</h1>
+      <p class="muted" id="done-text"></p>
+      <button class="btn primary block" id="done-again">Scan another</button>
+      <button class="btn ghost block" id="done-home">Done</button>
+    </div>
+  </section>
+
+  <!-- ============ Activity ============ -->
+  <section class="view" id="v-activity">
+    <header class="top">
+      <h1>Activity</h1>
+    </header>
+    <div class="seg wide" id="seg-act">
+      <button data-v="uploads" class="on">Uploads</button>
+      <button data-v="reimb" id="tab-reimb">Reimbursements</button>
+    </div>
+    <div id="act-uploads" class="list"></div>
+    <div id="act-reimb" class="list" hidden></div>
+    <footer class="sticky above-nav" id="pay-bar" hidden>
+      <button class="btn primary block" id="btn-pay">Mark paid</button>
+    </footer>
+  </section>
+
+  <!-- ============ Bottom nav ============ -->
+  <nav class="tabbar" id="tabbar" hidden>
+    <button data-go="home" class="on">
+      <svg viewBox="0 0 24 24"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/></svg>
+      <span>Scan</span>
+    </button>
+    <button data-go="activity">
+      <svg viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h9"/></svg>
+      <span>Activity</span><i class="dot" id="nav-dot" hidden></i>
+    </button>
+  </nav>
+
+  <!-- ============ Sheet / modal ============ -->
+  <div class="scrim" id="scrim" hidden></div>
+  <div class="sheet" id="sheet" hidden></div>
+  <div class="toast" id="toast" hidden></div>
+  <div class="busy" id="busy" hidden><div class="spinner"></div><p id="busy-text">Working…</p></div>
+
+  <input type="file" id="in-camera" accept="image/*" capture="environment" hidden>
+  <input type="file" id="in-file" accept="image/*,application/pdf" hidden>
+  <input type="file" id="in-proof" accept="image/*,application/pdf" hidden>
+
+  <script src="config.js"></script>
+  <script src="scanner.js"></script>
+  <script src="pdf.js"></script>
+  <script src="api.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
