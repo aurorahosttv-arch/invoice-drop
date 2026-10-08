@@ -205,7 +205,7 @@
     busy(true, 'Straightening…');
     setTimeout(() => {
       try {
-        S.cur.warped = Scanner.warp(S.cur.src, S.cur.quad, 1800);
+        S.cur.warped = Scanner.warp(S.cur.src, S.cur.quad, 1600);
         S.cur.rot = 0;
         show('preview'); drawPreview();
       } finally { busy(false); }
@@ -297,7 +297,7 @@
     try {
       if (S.file) file = { b64: S.file.b64, mime: S.file.mime };
       else {
-        const pdf = MiniPDF.build(S.pages.map(p => MiniPDF.canvasToPage(p.canvas, 0.72)));
+        const pdf = MiniPDF.build(S.pages.map(p => MiniPDF.canvasToPage(p.canvas, 0.65)));
         file = { b64: MiniPDF.bytesToB64(pdf), mime: 'application/pdf' };
       }
     } catch (err) { busy(false); return ($('#det-error').textContent = 'Could not build the PDF: ' + err.message); }
@@ -310,13 +310,41 @@
     await send(payload, false);
   });
 
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const sameDoc = (it, payload) => it.by === S.me.name && it.book === payload.book &&
+    Math.abs((Number(it.amount) || 0) - (Number(payload.amount) || 0)) < 0.005 &&
+    String(it.supplier || '').toLowerCase() === String(payload.supplier || '').toLowerCase();
+  const isRecentMine = (m) => m && m.by === S.me.name && (Date.now() - new Date(m.at).getTime()) < 15 * 60 * 1000;
+
+  // After an error, check whether the upload actually reached Drive (it sometimes does).
+  async function checkLanded(payload, since) {
+    for (let i = 0; i < 2; i++) {
+      await sleep(2500);
+      try {
+        const { items } = await API.call('recent', { limit: 10 });
+        const hit = items.find(it => sameDoc(it, payload) && new Date(it.at).getTime() >= since - 60000);
+        if (hit) return hit;
+      } catch (e) { /* keep trying */ }
+    }
+    return null;
+  }
+
   async function send(payload, force) {
     busy(true, 'Uploading…');
+    const started = Date.now();
     try {
       const r = await API.call('upload', Object.assign({}, payload, { force }));
       busy(false);
       if (r.duplicate) {
         const m = r.match;
+        if (isRecentMine(m)) {
+          // Most likely the same scan sent twice (e.g. after a connection hiccup)
+          const s = sheet('<h2>Already saved</h2><p class="muted">You saved this a few minutes ago as ' + esc(m.id) + ' (' + eur(m.amount) + (m.supplier ? ', ' + esc(m.supplier) : '') + '). There is nothing more to do.</p>' +
+            '<button class="btn primary block" id="sh-ok">OK</button><button class="btn ghost block" id="sh-anyway">No, this is a different invoice</button>');
+          s.querySelector('#sh-ok').onclick = () => { closeSheet(); resetDoc(); show('home'); refreshMe(); };
+          s.querySelector('#sh-anyway').onclick = () => { closeSheet(); send(payload, true); };
+          return;
+        }
         const s = sheet('<h2>Already uploaded?</h2><p class="muted">' + esc(m.by) + ' uploaded ' + eur(m.amount) + (m.supplier ? ' from ' + esc(m.supplier) : '') + ' on ' + fmtDate(m.at) + ' (' + esc(m.id) + ').</p>' +
           '<button class="btn primary block" id="sh-anyway">It\'s a different invoice, upload</button><button class="btn ghost block" id="sh-cancel">Cancel, it\'s the same</button>');
         s.querySelector('#sh-cancel').onclick = () => { closeSheet(); resetDoc(); show('home'); toast('Not uploaded'); };
@@ -331,7 +359,11 @@
         catch (e2) { $('#det-error').textContent = 'No connection and could not save on this phone. Try again.'; }
         return;
       }
-      $('#det-error').textContent = err.message;
+      busy(true, 'Checking it arrived…');
+      const hit = await checkLanded(payload, started);
+      busy(false);
+      if (hit) return done({ id: hit.id, reimbursable: /^Personal/.test(hit.paidBy || '') }, payload);
+      $('#det-error').textContent = 'Not saved: ' + err.message + '. Please tap Save again.';
     }
   }
 
@@ -359,7 +391,11 @@
     b.hidden = false; b.textContent = 'Uploading ' + items.length + ' saved scan' + (items.length > 1 ? 's' : '') + '…';
     let left = items.length;
     for (const it of items) {
-      try { await API.call('upload', Object.assign({}, it.payload, { force: true })); await API.Queue.remove(it.qid); left--; }
+      try {
+        const r = await API.call('upload', Object.assign({}, it.payload, { force: false }));
+        if (r.duplicate && !isRecentMine(r.match)) await API.call('upload', Object.assign({}, it.payload, { force: true }));
+        await API.Queue.remove(it.qid); left--;
+      }
       catch (e) { if (e.offline) break; await API.Queue.remove(it.qid); left--; toast('A saved scan failed: ' + e.message, 5000); }
     }
     b.textContent = left ? left + ' scan' + (left > 1 ? 's' : '') + ' waiting for connection' : 'All saved scans uploaded';
