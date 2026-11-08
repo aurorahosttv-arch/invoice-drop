@@ -194,3 +194,16 @@ h2 { font-size: 17px; margin: 0; font-weight: 600; }
 .sheet .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 14px; }
 .sheet .kv span:nth-child(odd) { color: var(--muted); }
 .sheet .opts { display: grid; gap: 10px; }
+
+/* ---------- ProVinci ---------- */
+.chips.light { justify-content: flex-start; flex-wrap: wrap; padding: 0; }
+.chips.light .chip { background: var(--surface); color: var(--ink); border: 1.5px solid var(--line); }
+.chips.light .chip.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+select.input { appearance: none; -webkit-appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 20px) 22px, calc(100% - 15px) 22px; background-size: 5px 5px; background-repeat: no-repeat; padding-right: 36px; }
+.ev-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin: 8px 0; display: grid; gap: 10px; }
+.ev-card .top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.ev-card .name { font-weight: 700; font-size: 17px; }
+.ev-card .meta { font-size: 13px; color: var(--muted); }
+.ev-card .acts { display: flex; gap: 8px; flex-wrap: wrap; }
+.ev-card .acts .btn { height: 42px; padding: 0 14px; font-size: 14px; flex: 1; }
+.pill.open { background: var(--accent-soft); color: var(--accent); }

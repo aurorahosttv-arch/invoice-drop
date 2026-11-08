@@ -13,7 +13,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="styles.css?v=3">
+  <link rel="stylesheet" href="styles.css?v=4">
 </head>
 <body>
   <!-- ============ Setup ============ -->
@@ -119,9 +119,28 @@
 
       <div class="field" id="f-book">
         <label>Where does it belong?</label>
-        <div class="seg" id="seg-book">
-          <button type="button" data-v="props">David's Properties</button>
-          <button type="button" data-v="ml">Mistral Loom</button>
+        <div class="seg" id="seg-book"></div>
+      </div>
+
+      <div id="f-pv" hidden>
+        <div class="field">
+          <label for="pv-event">Event</label>
+          <select id="pv-event" class="input"></select>
+        </div>
+        <div class="field">
+          <label>Who paid?</label>
+          <div class="seg" id="seg-pvpay">
+            <button type="button" data-v="personal">I paid personally</button>
+            <button type="button" data-v="company">Paid by ProVinci</button>
+          </div>
+        </div>
+        <div class="field">
+          <label for="pv-date">Receipt date</label>
+          <input id="pv-date" class="input" type="date">
+        </div>
+        <div class="field">
+          <label>Type</label>
+          <div class="chips light" id="pv-types"></div>
         </div>
       </div>
 
@@ -158,7 +177,7 @@
         <datalist id="suppliers"></datalist>
       </div>
       <div class="field">
-        <label for="det-note">Note <span class="opt">(optional)</span></label>
+        <label for="det-note"><span id="note-lbl">Note</span> <span class="opt">(optional)</span></label>
         <input id="det-note" class="input" placeholder="What was it for?">
       </div>
       <p class="error" id="det-error"></p>
@@ -241,10 +260,11 @@
       window.addEventListener('load', function () { setTimeout(fail, 8000); });
     })();
   </script>
-  <script src="config.js?v=3"></script>
-  <script src="scanner.js?v=3"></script>
-  <script src="pdf.js?v=3"></script>
-  <script src="api.js?v=3"></script>
-  <script src="app.js?v=3"></script>
+  <script src="config.js?v=4"></script>
+  <script src="scanner.js?v=4"></script>
+  <script src="pdf.js?v=4"></script>
+  <script src="api.js?v=4"></script>
+  <script src="declaration.js?v=4"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>

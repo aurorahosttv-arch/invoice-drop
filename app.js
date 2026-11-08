@@ -20,6 +20,7 @@
     prop: store.get('prop', 'V'),
     paid: 'company',
     open: [],
+    pv: { events: [], types: ['Flights', 'Hotel', 'Restaurant', 'Taxi', 'Tickets', 'Parking', 'Other'], event: store.get('pvEvent', 'ONEOFF'), pay: 'personal', type: store.get('pvType', 'Restaurant') },
   };
 
   /* ---------------- navigation ---------------- */
@@ -263,6 +264,10 @@
     $('#det-due').value = '';
     $('#det-amount').value = ''; $('#det-supplier').value = ''; $('#det-note').value = ''; $('#det-error').textContent = '';
     $('#f-book').hidden = me.books.length < 2;
+    const BOOKS = { props: "Properties", ml: 'Mistral Loom', pv: 'ProVinci' };
+    $('#seg-book').innerHTML = me.books.map(b => '<button type="button" data-v="' + b + '">' + BOOKS[b] + '</button>').join('');
+    $('#pv-date').value = todayIso();
+    if (me.books.indexOf('pv') >= 0) loadPvEvents();
     $('#suppliers').innerHTML = store.get('suppliers', []).map(s => '<option value="' + esc(s) + '">').join('');
     const sum = $('#det-summary');
     if (S.file) sum.innerHTML = '<div class="pdf">PDF</div><div><b>' + esc(S.file.name) + '</b><div class="muted">Ready to upload</div></div>';
@@ -284,6 +289,75 @@
     $('#f-due').hidden = S.paid !== 'unpaid';
     $('#amount-opt').textContent = S.paid === 'personal' ? (staff ? '(needed for your refund)' : '(needed for the reimbursement)')
       : S.paid === 'unpaid' ? '(amount due)' : '(optional)';
+    const pv = S.book === 'pv';
+    $('#f-pv').hidden = !pv;
+    $('#note-lbl').textContent = pv ? 'Comment' : 'Note';
+    if (pv) {
+      $('#f-prop').hidden = true; $('#f-paid').hidden = true; $('#f-due').hidden = true;
+      $$('#seg-pvpay button').forEach(b => b.classList.toggle('on', b.dataset.v === S.pv.pay));
+      $('#pv-types').innerHTML = S.pv.types.map(t => '<button type="button" class="chip' + (t === S.pv.type ? ' on' : '') + '" data-t="' + t + '">' + t + '</button>').join('');
+      $('#amount-opt').textContent = S.pv.pay === 'personal' ? '(needed for the declaration)' : '(optional)';
+    }
+  }
+
+  /* ---------------- ProVinci ---------------- */
+  async function loadPvEvents(selectId) {
+    try {
+      const r = await API.call('events');
+      S.pv.events = r.events || []; if (r.types) S.pv.types = r.types;
+    } catch (e) { /* keep cached list */ }
+    if (selectId) S.pv.event = selectId;
+    renderPvEvents();
+  }
+  function renderPvEvents() {
+    const open = S.pv.events.filter(e => e.status !== 'Reimbursed');
+    if (S.pv.event !== 'ONEOFF' && !open.some(e => e.id === S.pv.event)) S.pv.event = open.length ? open[open.length - 1].id : 'ONEOFF';
+    $('#pv-event').innerHTML = open.map(e => '<option value="' + esc(e.id) + '">' + esc(e.name) + '</option>').join('') +
+      '<option value="ONEOFF">One-off expense (not a trip)</option><option value="__new">+ New event…</option>';
+    $('#pv-event').value = S.pv.event;
+    syncDetails();
+  }
+  $('#pv-event').addEventListener('change', (e) => {
+    if (e.target.value !== '__new') { S.pv.event = e.target.value; return; }
+    e.target.value = S.pv.event;
+    newEventSheet((ev) => loadPvEvents(ev.id));
+  });
+  function newEventSheet(after) {
+    const s = sheet('<h2>New event</h2><p class="muted">The name appears on the Expense Declaration, e.g. "Arab Health 2027".</p>' +
+      '<input id="sh-evname" class="input" placeholder="Event name" maxlength="80"><p class="error" id="sh-everr"></p>' +
+      '<button class="btn primary block big" id="sh-evok">Create event</button><button class="btn ghost block" id="sh-evcancel">Cancel</button>');
+    setTimeout(() => s.querySelector('#sh-evname').focus(), 50);
+    s.querySelector('#sh-evcancel').onclick = closeSheet;
+    s.querySelector('#sh-evok').onclick = async () => {
+      const name = s.querySelector('#sh-evname').value.trim();
+      if (name.length < 3) return (s.querySelector('#sh-everr').textContent = 'Please enter the event name');
+      s.querySelector('#sh-evok').disabled = true;
+      try { const r = await API.call('createEvent', { name }); closeSheet(); toast('Created ' + r.event.name); if (after) after(r.event); }
+      catch (err) { s.querySelector('#sh-everr').textContent = err.message; s.querySelector('#sh-evok').disabled = false; }
+    };
+  }
+  $('#seg-pvpay').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.pv.pay = b.dataset.v; syncDetails(); });
+  $('#pv-types').addEventListener('click', (e) => { const b = e.target.closest('.chip'); if (!b) return; S.pv.type = b.dataset.t; store.set('pvType', S.pv.type); syncDetails(); });
+  const evName = (id) => { if (!id || id === 'One-off' || id === 'ONEOFF') return 'One-off'; const e = S.pv.events.find(x => x.id === id); return e ? e.name : id; };
+
+  async function createDeclaration(target) {
+    busy(true, 'Collecting receipts…');
+    try {
+      const data = await API.call('declarationData', target);
+      busy(true, 'Building the declaration…');
+      await Declaration.ensureLib();
+      const logo = await Declaration.loadLogo();
+      const bytes = await Declaration.build(data, logo);
+      busy(true, 'Saving to Drive…');
+      const r = await API.call('saveDeclaration', Object.assign({}, target, { pdf: { b64: MiniPDF.bytesToB64(bytes), mime: 'application/pdf' } }));
+      busy(false);
+      const total = data.lines.reduce((a, l) => a + (Number(l.amount) || 0), 0);
+      const s = sheet('<h2>Declaration ready</h2><p class="muted">' + esc(r.name) + '<br>' + data.lines.length + ' receipt' + (data.lines.length > 1 ? 's' : '') + ' · ' + eur(total) + '. Receipts are attached inside the PDF.</p>' +
+        (r.url ? '<a class="btn primary block" href="' + esc(r.url) + '" target="_blank" rel="noopener">Open PDF</a>' : '') +
+        '<button class="btn ghost block" id="sh-close">Done</button>');
+      s.querySelector('#sh-close').onclick = closeSheet;
+      loadReimb();
+    } catch (e) { busy(false); toast(e.offline ? 'No connection. Try again later.' : e.message, 5000); }
   }
   $('#seg-book').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.book = b.dataset.v; syncDetails(); });
   $('#seg-prop').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.prop = b.dataset.v; syncDetails(); });
@@ -298,7 +372,9 @@
     const amount = amountRaw ? Number(amountRaw) : 0;
     if (amountRaw && !(amount > 0)) return ($('#det-error').textContent = 'Please enter the amount as a number, e.g. 24.50');
     if (S.paid === 'personal' && S.book === 'ml' && !(amount > 0)) return ($('#det-error').textContent = 'Please enter how much you paid, so it can be paid back.');
-    if (S.paid === 'unpaid' && !(amount > 0)) return ($('#det-error').textContent = 'Please enter the amount due, so it shows in Outstanding.');
+    if (S.book !== 'pv' && S.paid === 'unpaid' && !(amount > 0)) return ($('#det-error').textContent = 'Please enter the amount due, so it shows in Outstanding.');
+    if (S.book === 'pv' && S.pv.pay === 'personal' && !(amount > 0)) return ($('#det-error').textContent = 'Please enter the amount, so it goes on the Expense Declaration.');
+    if (S.book === 'pv' && !$('#pv-date').value) return ($('#det-error').textContent = 'Please enter the receipt date.');
     busy(true, 'Preparing PDF…');
     await new Promise(r => setTimeout(r, 30));
     let file;
@@ -309,10 +385,14 @@
         file = { b64: MiniPDF.bytesToB64(pdf), mime: 'application/pdf' };
       }
     } catch (err) { busy(false); return ($('#det-error').textContent = 'Could not build the PDF: ' + err.message); }
-    const payload = {
+    const payload = S.book === 'pv' ? {
+      book: 'pv', event: S.pv.event, payment: S.pv.pay, receiptDate: $('#pv-date').value, type: S.pv.type,
+      amount: amount || '', supplier: $('#det-supplier').value.trim(), note: $('#det-note').value.trim(), file,
+    } : {
       book: S.book, property: S.book === 'props' ? S.prop : '', payment: S.paid, dueDate: S.paid === 'unpaid' ? $('#det-due').value : '',
       amount: amount || '', supplier: $('#det-supplier').value.trim(), note: $('#det-note').value.trim(), file,
     };
+    if (S.book === 'pv') store.set('pvEvent', S.pv.event);
     store.set('book', S.book); store.set('prop', S.prop);
     if (payload.supplier) { const list = store.get('suppliers', []).filter(s => s.toLowerCase() !== payload.supplier.toLowerCase()); list.unshift(payload.supplier); store.set('suppliers', list.slice(0, 30)); }
     await send(payload, false);
@@ -376,11 +456,12 @@
   }
 
   function done(r, payload, queued) {
-    const where = payload.book === 'props' ? "David's Properties · " + ({ V: 'Valletta', G: 'Gzira', U: 'Unsorted' }[payload.property] || '') : 'Mistral Loom';
+    const where = payload.book === 'props' ? "David's Properties · " + ({ V: 'Valletta', G: 'Gzira', U: 'Unsorted' }[payload.property] || '')
+      : payload.book === 'pv' ? 'ProVinci · ' + (r && r.event ? r.event : evName(payload.event)) : 'Mistral Loom';
     $('#done-tick').classList.toggle('queued', !!queued);
     $('#done-title').textContent = queued ? 'Saved on this phone' : 'Saved';
     let text = queued ? 'No connection right now. It will upload automatically next time you open the app.' : where + (r && r.id ? ' · ' + r.id : '');
-    if (!queued && r && r.status === 'To reimburse') text += '\nAdded to reimbursements: ' + eur(payload.amount);
+    if (!queued && r && r.status === 'To reimburse') text += payload.book === 'pv' ? (payload.event === 'ONEOFF' ? '\nOutstanding until ProVinci reimburses you: ' : '\nAdded to the Expense Declaration: ') + eur(payload.amount) : '\nAdded to reimbursements: ' + eur(payload.amount);
     if (!queued && r && r.status === 'Not paid') text += '\nAdded to Outstanding: ' + eur(payload.amount) + ' to pay';
     $('#done-text').textContent = text;
     $('#done-text').style.whiteSpace = 'pre-line';
@@ -426,7 +507,7 @@
   $('#seg-act').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) openActivity(b.dataset.v); });
 
   const PILL = { 'Not paid': '<span class="pill unpaid">Not paid</span>', 'To reimburse': '<span class="pill reimb">To reimburse</span>', 'Reimbursed': '<span class="pill done">Reimbursed</span>' };
-  const whereOf = (it) => it.book === 'props' ? (it.property || 'Properties') : 'Mistral Loom';
+  const whereOf = (it) => it.book === 'props' ? (it.property || 'Properties') : it.book === 'pv' ? 'ProVinci · ' + evName(it.event) : 'Mistral Loom';
   const todayIso = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
 
   async function loadUploads() {
@@ -447,16 +528,36 @@
     const el = $('#act-reimb');
     el.innerHTML = '<div class="empty">Loading…</div>';
     try {
-      const { items, settled, totals } = await API.call('outstanding');
+      const resp = await API.call('outstanding');
+      const items = resp.items, settled = resp.settled;
+      if (resp.events) S.pv.events = resp.events;
       S.open = items;
       const approver = S.me.canApprove;
       let html = '';
       if (approver) {
-        const unpaid = items.filter(i => i.payment === 'Not paid');
-        const reimb = items.filter(i => i.payment === 'To reimburse');
-        if (!items.length) html += '<div class="card balance"><div><div class="lbl">Outstanding</div><div class="amt">All settled</div></div></div>';
+        const base = items.filter(i => i.book !== 'pv');
+        const pvItems = items.filter(i => i.book === 'pv');
+        const unpaid = base.filter(i => i.payment === 'Not paid');
+        const reimb = base.filter(i => i.payment === 'To reimburse');
+        const totals = { unpaid: unpaid.reduce((a, r) => a + r.amount, 0), reimburse: {} };
+        reimb.forEach(r => { totals.reimburse[r.paidBy] = (totals.reimburse[r.paidBy] || 0) + r.amount; });
+        const pvEvents = (resp.events || []).filter(e => e.status !== 'Reimbursed' && e.receipts > 0);
+        if (!base.length && !pvItems.length && !pvEvents.length) html += '<div class="card balance"><div><div class="lbl">Outstanding</div><div class="amt">All settled</div></div></div>';
         if (unpaid.length) {
           html += '<div class="group-title">Suppliers to pay · ' + eur(totals.unpaid) + '</div>' + unpaid.map(rowO).join('');
+        }
+        if (pvEvents.length || pvItems.some(i => i.event === 'One-off')) {
+          html += '<div class="group-title">ProVinci</div>';
+          pvEvents.forEach(ev => {
+            const pill = ev.status === 'Declared' ? '<span class="pill reimb">Declared</span>' : '<span class="pill open">Collecting</span>';
+            html += '<div class="ev-card"><div class="top"><span class="name">' + esc(ev.name) + pill + '</span><span class="a">' + eur(ev.openTotal) + '</span></div>' +
+              '<div class="meta">' + ev.claimCount + ' receipt' + (ev.claimCount === 1 ? '' : 's') + ' to claim' + (ev.companyPaid ? ' · ' + eur(ev.companyPaid) + ' paid by ProVinci' : '') +
+              (ev.declaration ? ' · <a href="' + esc(ev.declaration) + '" target="_blank" rel="noopener">declaration</a>' : '') + (ev.folder ? ' · <a href="' + esc(ev.folder) + '" target="_blank" rel="noopener">folder</a>' : '') + '</div>' +
+              '<div class="acts">' + (ev.claimCount ? '<button class="btn ' + (ev.status === 'Declared' ? 'ghost' : 'primary') + '" data-decl="' + esc(ev.id) + '">' + (ev.declaration ? 'Update declaration' : 'Create declaration') + '</button>' : '') +
+              (ev.openCount ? '<button class="btn ' + (ev.status === 'Declared' ? 'primary' : 'ghost') + '" data-reimbev="' + esc(ev.id) + '">Mark reimbursed</button>' : '') + '</div></div>';
+          });
+          const oneoffs = pvItems.filter(i => i.event === 'One-off');
+          if (oneoffs.length) html += '<div class="group-title">ProVinci one-offs</div>' + oneoffs.map(rowO).join('');
         }
         if (reimb.length) {
           html += '<div class="group-title">To reimburse</div>';
@@ -475,7 +576,9 @@
       if (settled.length) html += '<div class="group-title">Recently settled</div>' + settled.slice(0, 15).map(rowS).join('');
       el.innerHTML = html;
       el.querySelectorAll('.row.tap').forEach(row => row.onclick = (e) => { if (e.target.closest('a')) return; const it = items.find(i => i.id === row.dataset.id); if (it && approver) openItem(it); });
-      el.querySelectorAll('[data-all]').forEach(b => b.onclick = () => reimburseSheet(items.filter(i => i.payment === 'To reimburse' && i.paidBy === b.dataset.all)));
+      el.querySelectorAll('[data-all]').forEach(b => b.onclick = () => reimburseSheet(items.filter(i => i.book !== 'pv' && i.payment === 'To reimburse' && i.paidBy === b.dataset.all)));
+      el.querySelectorAll('[data-decl]').forEach(b => b.onclick = () => createDeclaration({ event: b.dataset.decl }));
+      el.querySelectorAll('[data-reimbev]').forEach(b => b.onclick = () => reimburseSheet(items.filter(i => i.book === 'pv' && i.event === b.dataset.reimbev && i.payment === 'To reimburse')));
     } catch (e) { el.innerHTML = '<div class="empty">' + esc(e.offline ? 'You are offline.' : e.message) + '</div>'; }
   }
 
@@ -496,11 +599,20 @@
 
   function detailsKV(it) {
     return '<div class="kv"><span>Where</span><span>' + esc(whereOf(it)) + '</span><span>Uploaded</span><span>' + fmtDate(it.at) + ' by ' + esc(it.by) + '</span>' +
+      (it.book === 'pv' && it.receiptDate ? '<span>Receipt date</span><span>' + fmtDate(it.receiptDate) + '</span>' : '') +
       (it.due ? '<span>Due</span><span>' + fmtDate(it.due) + '</span>' : '') + (it.note ? '<span>Note</span><span>' + esc(it.note) + '</span>' : '') +
       (it.url ? '<span>Document</span><span><a href="' + esc(it.url) + '" target="_blank" rel="noopener">open</a></span>' : '') + '</div>';
   }
 
   function openItem(it) {
+    if (it.book === 'pv' && it.event === 'One-off') {
+      const s = sheet('<h2>' + esc(it.supplier || it.type || 'Expense') + ' · ' + eur(it.amount) + '</h2>' + detailsKV(it) +
+        '<div class="opts"><button class="btn ' + (it.declaration ? 'ghost' : 'primary') + ' block big" id="sh-decl">' + (it.declaration ? 'Update Expense Declaration' : 'Create Expense Declaration') + '</button>' +
+        '<button class="btn ' + (it.declaration ? 'primary' : 'ghost') + ' block" id="sh-reimb">ProVinci has reimbursed me</button></div>');
+      s.querySelector('#sh-decl').onclick = () => { closeSheet(); createDeclaration({ id: it.id }); };
+      s.querySelector('#sh-reimb').onclick = () => { closeSheet(); reimburseSheet([it]); };
+      return;
+    }
     if (it.payment === 'To reimburse') return reimburseSheet([it]);
     // Not paid
     const ml = it.book === 'ml';
@@ -520,7 +632,8 @@
     const total = items.reduce((a, r) => a + r.amount, 0);
     const person = items[0].paidBy;
     let method = store.get('payMethod', 'Bank transfer'); let proof = null;
-    const s = sheet('<h2>Reimburse ' + esc(person) + ' ' + eur(total) + '?</h2>' + (items.length === 1 ? detailsKV(items[0]) : '<p class="muted">' + items.length + ' items</p>') +
+    const pvRe = items[0].book === 'pv';
+    const s = sheet('<h2>' + (pvRe ? 'ProVinci reimbursed you ' + eur(total) + '?' : 'Reimburse ' + esc(person) + ' ' + eur(total) + '?') + '</h2>' + (items.length === 1 ? detailsKV(items[0]) : '<p class="muted">' + items.length + ' items' + (pvRe ? ' · ' + esc(evName(items[0].event)) : '') + '</p>') +
       '<div class="chips" id="sh-methods">' + ['Bank transfer', 'Revolut', 'Cash', 'Other'].map(m => '<button class="chip' + (m === method ? ' on' : '') + '" data-m="' + m + '">' + m + '</button>').join('') + '</div>' +
       '<button class="btn ghost block" id="sh-proof">Attach proof of payment (optional)</button>' +
       '<button class="btn primary block big" id="sh-confirm">Mark reimbursed</button>');
@@ -535,7 +648,7 @@
       };
       inp.click();
     };
-    s.querySelector('#sh-confirm').onclick = () => { store.set('payMethod', method); doSettle({ ids: items.map(i => i.id), kind: 'reimbursed', method, proof }, 'Reimbursed ' + eur(total) + ' to ' + person); };
+    s.querySelector('#sh-confirm').onclick = () => { store.set('payMethod', method); doSettle({ ids: items.map(i => i.id), kind: 'reimbursed', method, proof }, pvRe ? 'Marked ' + eur(total) + ' as reimbursed by ProVinci' : 'Reimbursed ' + eur(total) + ' to ' + person); };
   }
 
   async function doSettle(body, okMsg) {
