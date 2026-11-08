@@ -168,7 +168,7 @@
   let libPromise = null;
   function ensureLib() {
     if (global.PDFLib) return Promise.resolve();
-    if (!libPromise) libPromise = new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'pdf-lib.min.js?v=4'; s.onload = res; s.onerror = () => { libPromise = null; rej(new Error('Could not load the PDF tool')); }; document.head.appendChild(s); });
+    if (!libPromise) libPromise = new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'pdf-lib.min.js?v=5'; s.onload = res; s.onerror = () => { libPromise = null; rej(new Error('Could not load the PDF tool')); }; document.head.appendChild(s); });
     return libPromise;
   }
   async function loadLogo() {

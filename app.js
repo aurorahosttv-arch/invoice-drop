@@ -338,7 +338,7 @@
   }
   $('#seg-pvpay').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.pv.pay = b.dataset.v; syncDetails(); });
   $('#pv-types').addEventListener('click', (e) => { const b = e.target.closest('.chip'); if (!b) return; S.pv.type = b.dataset.t; store.set('pvType', S.pv.type); syncDetails(); });
-  const evName = (id) => { if (!id || id === 'One-off' || id === 'ONEOFF') return 'One-off'; const e = S.pv.events.find(x => x.id === id); return e ? e.name : id; };
+  const evName = (id) => { if (id === 'Unassigned') return 'From email · to sort'; if (!id || id === 'One-off' || id === 'ONEOFF') return 'One-off'; const e = S.pv.events.find(x => x.id === id); return e ? e.name : id; };
 
   async function createDeclaration(target) {
     busy(true, 'Collecting receipts…');
@@ -546,12 +546,15 @@
         if (unpaid.length) {
           html += '<div class="group-title">Suppliers to pay · ' + eur(totals.unpaid) + '</div>' + unpaid.map(rowO).join('');
         }
+        const toSort = pvItems.filter(i => i.event === 'Unassigned');
+        if (toSort.length) html += '<div class="group-title">ProVinci · from email, to sort</div>' + toSort.map(rowO).join('');
         if (pvEvents.length || pvItems.some(i => i.event === 'One-off')) {
           html += '<div class="group-title">ProVinci</div>';
           pvEvents.forEach(ev => {
             const pill = ev.status === 'Declared' ? '<span class="pill reimb">Declared</span>' : '<span class="pill open">Collecting</span>';
             html += '<div class="ev-card"><div class="top"><span class="name">' + esc(ev.name) + pill + '</span><span class="a">' + eur(ev.openTotal) + '</span></div>' +
               '<div class="meta">' + ev.claimCount + ' receipt' + (ev.claimCount === 1 ? '' : 's') + ' to claim' + (ev.companyPaid ? ' · ' + eur(ev.companyPaid) + ' paid by ProVinci' : '') +
+              (ev.pending ? ' · <b class="overdue">' + ev.pending + ' from email, details pending</b>' : '') + (ev.tag ? ' · email tag <b>' + esc(ev.tag) + '</b>' : '') +
               (ev.declaration ? ' · <a href="' + esc(ev.declaration) + '" target="_blank" rel="noopener">declaration</a>' : '') + (ev.folder ? ' · <a href="' + esc(ev.folder) + '" target="_blank" rel="noopener">folder</a>' : '') + '</div>' +
               '<div class="acts">' + (ev.claimCount ? '<button class="btn ' + (ev.status === 'Declared' ? 'ghost' : 'primary') + '" data-decl="' + esc(ev.id) + '">' + (ev.declaration ? 'Update declaration' : 'Create declaration') + '</button>' : '') +
               (ev.openCount ? '<button class="btn ' + (ev.status === 'Declared' ? 'primary' : 'ghost') + '" data-reimbev="' + esc(ev.id) + '">Mark reimbursed</button>' : '') + '</div></div>';
@@ -586,7 +589,8 @@
     const overdue = r.payment === 'Not paid' && r.due && r.due < todayIso();
     const sub = [fmtDate(r.at), esc(whereOf(r))];
     if (r.payment === 'Not paid' && r.due) sub.push(overdue ? '<b class="overdue">overdue since ' + fmtDate(r.due) + '</b>' : 'due ' + fmtDate(r.due));
-    if (r.payment === 'To reimburse' && S.me.canApprove) sub.push('paid by ' + esc(r.paidBy));
+    if (r.payment === 'To reimburse' && S.me.canApprove && r.book !== 'pv') sub.push('paid by ' + esc(r.paidBy));
+    if (r.filing === 'Needs details') sub.push('<b class="overdue">details pending</b>');
     if (r.url) sub.push('<a href="' + esc(r.url) + '" target="_blank" rel="noopener">document</a>');
     return '<div class="row' + (S.me.canApprove ? ' tap' : '') + '" data-id="' + esc(r.id) + '"><div class="main"><div class="t">' + esc(r.supplier || 'Invoice') + (PILL[r.payment] || '') + '</div><div class="s">' + sub.join(' · ') + '</div></div>' +
       '<div class="a">' + eur(r.amount) + '</div>' + (S.me.canApprove ? '<span class="chev">›</span>' : '') + '</div>';
@@ -605,6 +609,7 @@
   }
 
   function openItem(it) {
+    if (it.book === 'pv' && it.event === 'Unassigned') return assignSheet(it);
     if (it.book === 'pv' && it.event === 'One-off') {
       const s = sheet('<h2>' + esc(it.supplier || it.type || 'Expense') + ' · ' + eur(it.amount) + '</h2>' + detailsKV(it) +
         '<div class="opts"><button class="btn ' + (it.declaration ? 'ghost' : 'primary') + ' block big" id="sh-decl">' + (it.declaration ? 'Update Expense Declaration' : 'Create Expense Declaration') + '</button>' +
@@ -649,6 +654,21 @@
       inp.click();
     };
     s.querySelector('#sh-confirm').onclick = () => { store.set('payMethod', method); doSettle({ ids: items.map(i => i.id), kind: 'reimbursed', method, proof }, pvRe ? 'Marked ' + eur(total) + ' as reimbursed by ProVinci' : 'Reimbursed ' + eur(total) + ' to ' + person); };
+  }
+
+  function assignSheet(it) {
+    const open = (S.pv.events || []).filter(e => e.status !== 'Reimbursed');
+    const s = sheet('<h2>Where does this belong?</h2>' + detailsKV(it) +
+      '<select id="sh-ev" class="input">' + open.map(e => '<option value="' + esc(e.id) + '">' + esc(e.name) + '</option>').join('') + '<option value="ONEOFF">One-off expense (not a trip)</option></select>' +
+      '<p class="muted" style="font-size:13px">Amount, date and type are filled in by Claude. You can also type the amount now.</p>' +
+      '<div class="money"><span>€</span><input id="sh-amt" class="input" inputmode="decimal" placeholder="Amount (optional)"></div>' +
+      '<button class="btn primary block big" id="sh-save">Save</button>');
+    s.querySelector('#sh-save').onclick = async () => {
+      const amt = s.querySelector('#sh-amt').value.trim().replace(',', '.');
+      closeSheet(); busy(true, 'Saving…');
+      try { await API.call('updateItem', { id: it.id, event: s.querySelector('#sh-ev').value, amount: amt }); busy(false); toast('Filed'); refreshMe(); loadReimb(); }
+      catch (e) { busy(false); toast(e.message, 4000); }
+    };
   }
 
   async function doSettle(body, okMsg) {

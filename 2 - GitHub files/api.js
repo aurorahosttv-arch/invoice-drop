@@ -71,6 +71,12 @@
         if (b.event) { const ev = s.ev.find(e => e.id === b.event); ev.status = 'Declared'; ev.declaration = 'about:blank'; save(s); return { ok: true, url: '', name: 'Expense Declaration - ' + ev.name + '.pdf' }; }
         s.up.forEach(r => { if (r.id === b.id) r.declaration = 'Expense Declaration'; }); save(s); return { ok: true, url: '', name: 'Expense Declaration - ' + b.id + '.pdf' };
       }
+      if (b.action === 'updateItem') {
+        const r = s.up.find(x => x.id === b.id); if (!r) throw new Error('Item not found');
+        if (b.event) r.event = b.event === 'ONEOFF' ? 'One-off' : b.event;
+        const amt = Number(String(b.amount || '').replace(',', '.')); if (amt > 0) { r.amount = amt; r.filing = 'Filed'; }
+        save(s); return { ok: true, id: r.id };
+      }
       if (b.action === 'upload' && b.book === 'pv') {
         if (!pvOk) throw new Error('No access to this book');
         const personal = b.payment !== 'company'; const amount = Number(String(b.amount || '').replace(',', '.')) || 0;
